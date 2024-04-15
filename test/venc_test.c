@@ -5,7 +5,7 @@
  *
  * @Author: David(qiang.fu@spacemit.com)
  * @Date: 2023-01-13 18:10:10
- * @LastEditTime: 2023-11-14 17:27:03
+ * @LastEditTime: 2024-04-02 10:51:46
  * @Description:
  */
 
@@ -42,7 +42,7 @@ typedef struct _TestVencContext {
   FILE *pOutputFile;
   MppVencCtx *pVencCtx;
   MppCodingType eCodingType;
-  MppCodecType eCodecType;
+  MppModuleType eCodecType;
   MppPacket *pPacket;
   MppFrame *pFrame;
   S32 nWidth;
@@ -58,7 +58,7 @@ static const MppArgument ArgumentMapping[] = {
     {"-o", "--save_frame_file", SAVE_FRAME_FILE, "Saving picture file path"},
     {"-w", "--width", WIDTH, "Video width"},
     {"-h", "--height", HEIGHT, "Video height"},
-    {"-f", "--format", FORMAT, "Video pixel format"},
+    {"-f", "--format", FORMAT, "Video PixelFormat"},
 };
 
 static S32 parse_argument(TestVencContext *context, char *argument, char *value,
@@ -66,7 +66,7 @@ static S32 parse_argument(TestVencContext *context, char *argument, char *value,
   ARGUMENT arg;
   S32 len = value == NULL ? 0 : strlen(value);
   if (len > DEMO_FILE_NAME_LEN) {
-    error("value is too long, fix it !");
+    error("value is too long, please check!");
     return -1;
   }
 
@@ -251,14 +251,13 @@ S32 main(S32 argc, char **argv) {
     for (S32 i = 1; i < (int)argc; i += 2) {
       ret = parse_argument(context, argv[i], argv[i + 1], argument_num);
       if (ret < 0) {
-        return -1;
+        goto finish;
       }
     }
   } else {
-    error("There is no arguments, We need more arguments !");
+    error("There is no arguments, We need more arguments!");
     print_demo_usage(ArgumentMapping, argument_num);
-    free(context);
-    return -1;
+    goto finish;
   }
 
   // create venc channel
@@ -356,11 +355,21 @@ finish:
     context->pInputFile = NULL;
   }
 
-  FRAME_Destory(context->pFrame);
+  if (context->pFrame) {
+    FRAME_Destory(context->pFrame);
+    context->pFrame = NULL;
+  }
 
-  PACKET_Destory(context->pPacket);
+  if (context->pPacket) {
+    PACKET_Free(context->pPacket);
+    PACKET_Destory(context->pPacket);
+    context->pPacket = NULL;
+  }
 
-  VENC_DestoryChannel(context->pVencCtx);
+  if (context->pVencCtx) {
+    VENC_DestoryChannel(context->pVencCtx);
+    context->pVencCtx = NULL;
+  }
 
   if (context->pInputFileName) {
     free(context->pInputFileName);
