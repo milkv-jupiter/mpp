@@ -5,7 +5,7 @@
  *
  * @Author: David(qiang.fu@spacemit.com)
  * @Date: 2023-01-13 18:10:10
- * @LastEditTime: 2024-04-09 14:07:08
+ * @LastEditTime: 2024-04-17 13:47:02
  * @Description:
  */
 
@@ -139,6 +139,18 @@ S32 read_frame_from_file(TestVencContext *context) {
       size[0] = context->nWidth * context->nHeight;
       size[1] = (context->nWidth / 2) * (context->nHeight);
       pnum = 2;
+      break;
+    case PIXEL_FORMAT_RGBA:
+    case PIXEL_FORMAT_ARGB:
+    case PIXEL_FORMAT_BGRA:
+    case PIXEL_FORMAT_ABGR:
+      size[0] = context->nWidth * context->nHeight * 4;
+      pnum = 1;
+      break;
+    case PIXEL_FORMAT_YUYV:
+    case PIXEL_FORMAT_UYVY:
+      size[0] = context->nWidth * context->nHeight * 2;
+      pnum = 1;
       break;
     default:
       error("Unsupported picture format (%d)", context->ePixelFormat);
@@ -278,6 +290,19 @@ S32 main(S32 argc, char **argv) {
           fflush(context->pOutputFile);
         }
       } while (ret != MPP_OK);
+
+      if (context->eCodingType == CODING_VP8 ||
+          context->eCodingType == CODING_VP9) {
+        do {
+          ret = VENC_GetOutputStreamBuffer(
+              context->pVencCtx, PACKET_GetBaseData(context->pPacket));
+          if (ret == MPP_OK) {
+            fwrite(PACKET_GetDataPointer(context->pPacket),
+                   PACKET_GetLength(context->pPacket), 1, context->pOutputFile);
+            fflush(context->pOutputFile);
+          }
+        } while (ret != MPP_OK);
+      }
 
       S32 index = -1;
       do {
