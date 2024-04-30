@@ -5,7 +5,7 @@
  *
  * @Author: David(qiang.fu@spacemit.com)
  * @Date: 2023-01-13 18:10:10
- * @LastEditTime: 2024-04-17 13:47:02
+ * @LastEditTime: 2024-04-28 15:54:04
  * @Description:
  */
 
@@ -53,7 +53,7 @@ static const MppArgument ArgumentMapping[] = {
     {"-H", "--help", HELP, "Print help"},
     {"-i", "--input", INPUT, "Input file path"},
     {"-c", "--codingtype", CODING_TYPE, "Coding type"},
-    {"-ct", "--codectype", CODEC_TYPE, "Codec type"},
+    {"-m", "--moduletype", MODULE_TYPE, "Module type"},
     {"-o", "--save_frame_file", SAVE_FRAME_FILE, "Saving picture file path"},
     {"-w", "--width", WIDTH, "Video width"},
     {"-h", "--height", HEIGHT, "Video height"},
@@ -88,9 +88,9 @@ static S32 parse_argument(TestVencContext *context, char *argument, char *value,
       sscanf(value, "%d", (S32 *)&(context->eCodingType));
       debug(" coding type is : %s", mpp_codingtype2str(context->eCodingType));
       break;
-    case CODEC_TYPE:
+    case MODULE_TYPE:
       sscanf(value, "%d", (S32 *)&(context->eCodecType));
-      debug(" codec type is : %s", mpp_codectype2str(context->eCodecType));
+      debug(" codec type is : %s", mpp_moduletype2str(context->eCodecType));
       break;
     case SAVE_FRAME_FILE:
       sscanf(value, "%2048s", context->pOutputFileName);
@@ -206,6 +206,7 @@ S32 main(S32 argc, char **argv) {
   MppData *tmp;
   BOOL stop = MPP_FALSE;
   BOOL eos = MPP_FALSE;
+  S32 id = 0;
 
   context = TestVencContextCreate();
   if (!context) {
@@ -279,6 +280,9 @@ S32 main(S32 argc, char **argv) {
     tmpSize = leaveSize;
 
     if (ret > 0) {
+      FRAME_SetID(context->pFrame, id);
+      id++;
+      if (id == 12) id = 0;
       ret = VENC_SendInputFrame(context->pVencCtx,
                                 FRAME_GetBaseData(context->pFrame));
       do {
@@ -319,6 +323,9 @@ S32 main(S32 argc, char **argv) {
       // Continue sending empty buffers after encoding
       if (0 == leaveSize && need_drain < 4) {
         FRAME_SetEos(context->pFrame, FRAME_EOS_WITHOUT_DATA);
+        FRAME_SetID(context->pFrame, id);
+        id++;
+        if (id == 12) id = 0;
         ret = VENC_SendInputFrame(context->pVencCtx,
                                   FRAME_GetBaseData(context->pFrame));
         do {
