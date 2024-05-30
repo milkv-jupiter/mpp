@@ -5,7 +5,7 @@
  *
  * @Author: David(qiang.fu@spacemit.com)
  * @Date: 2023-01-13 18:10:10
- * @LastEditTime: 2024-04-28 15:53:25
+ * @LastEditTime: 2024-04-30 14:30:18
  * @Description:
  */
 
@@ -23,8 +23,10 @@
 #include "type.h"
 #include "vdec.h"
 #include "venc.h"
+#include "vi.h"
+#include "vo.h"
 
-typedef struct _TestVdecContext {
+typedef struct _TestContext {
   /**
    * path of input file with stream
    */
@@ -40,29 +42,29 @@ typedef struct _TestVdecContext {
    */
   U8 *pMidFileName;
 
-  FILE *pInputFile;
   FILE *pMidFile;
   FILE *pOutputFile;
-
-  /**
-   * used for demuxer
-   */
-  S32 nFileOffset;
-  MppParseContext *pParseCtx;
 
   /**
    * used for save para from cmd
    */
   MppCodingType eCodingType;
   S32 eOutputPixelFormat;
-  MppModuleType eCodecType;
+
+  MppModuleType eViType;
+  MppModuleType eVdecType;
+  MppModuleType eVencType;
+  MppModuleType eVoType;
 
   /**
    * used for decoder and encoder
    */
+  MppViCtx *pViCtx;
   MppVdecCtx *pVdecCtx;
   MppVdecPara *pVdecPara;
   MppVencCtx *pVencCtx;
+  MppVoCtx *pVoCtx;
+
   MppPacket *pInputPacket;
   MppPacket *pOutputPacket;
   MppFrame *pFrame;
@@ -71,7 +73,7 @@ typedef struct _TestVdecContext {
   S64 nTimeStamp;
   BOOL bIsDestoryed;
   pthread_t parse_thread;
-} TestVdecContext;
+} TestContext;
 
 static const MppArgument ArgumentMapping[] = {
     {"-H", "--help", HELP, "Print help"},
@@ -84,7 +86,7 @@ static const MppArgument ArgumentMapping[] = {
     {"-f", "--format", FORMAT, "Video PixelFormat"},
 };
 
-static S32 parse_argument(TestVdecContext *context, char *argument, char *value,
+static S32 parse_argument(TestContext *context, char *argument, char *value,
                           S32 num) {
   ARGUMENT arg;
   S32 len = value == NULL ? 0 : strlen(value);
@@ -113,8 +115,13 @@ static S32 parse_argument(TestVdecContext *context, char *argument, char *value,
       debug(" coding type is : %s", mpp_codingtype2str(context->eCodingType));
       break;
     case MODULE_TYPE:
-      sscanf(value, "%d", (S32 *)&(context->eCodecType));
-      debug(" codec type is : %s", mpp_moduletype2str(context->eCodecType));
+      sscanf(value, "%d,%d,%d,%d", (S32 *)&(context->eViType),
+             (S32 *)&(context->eVdecType), (S32 *)&(context->eVencType),
+             (S32 *)&(context->eVoType));
+      debug(" vi type is : %s", mpp_moduletype2str(context->eViType));
+      debug(" vdec type is : %s", mpp_moduletype2str(context->eVdecType));
+      debug(" venc type is : %s", mpp_moduletype2str(context->eVencType));
+      debug(" vo type is : %s", mpp_moduletype2str(context->eVoType));
       break;
     case SAVE_FRAME_FILE:
       sscanf(value, "%2048s", context->pOutputFileName);
@@ -145,13 +152,13 @@ static S32 parse_argument(TestVdecContext *context, char *argument, char *value,
   return 0;
 }
 
-static TestVdecContext *TestVdecContextCreate() {
-  TestVdecContext *context = (TestVdecContext *)malloc(sizeof(TestVdecContext));
+static TestContext *TestContextCreate() {
+  TestContext *context = (TestContext *)malloc(sizeof(TestContext));
   if (!context) {
-    error("Can not malloc TestVdecContext, please check !");
+    error("Can not malloc TestContext, please check !");
     return NULL;
   }
-  memset(context, 0, sizeof(TestVdecContext));
+  memset(context, 0, sizeof(TestContext));
 
   context->pInputFileName = (U8 *)malloc(DEMO_FILE_NAME_LEN);
   if (!context->pInputFileName) {
@@ -181,7 +188,6 @@ static TestVdecContext *TestVdecContextCreate() {
   }
   memset(context->pMidFileName, 0, DEMO_FILE_NAME_LEN);
 
-  context->nFileOffset = 0;
   context->nTimeStamp = 0;
 
   return context;
@@ -189,136 +195,164 @@ static TestVdecContext *TestVdecContextCreate() {
 
 void *do_parse(void *private_data) {
   debug("------------------new thread : do_parse-------------------");
-  TestVdecContext *context = (TestVdecContext *)private_data;
+  TestContext *context = (TestContext *)private_data;
   S32 ret = 0;
-  U8 *stream_data = NULL;
-  U8 *tmp_stream_data = NULL;
-  S32 stream_length = 0;
-  S32 need_drain = 0;
-  S32 length = 0;
-  S32 fileSize;
-
-  stream_data = (U8 *)malloc(MPP_PACKET_PARSE_REGION_SIZE);
-  tmp_stream_data = stream_data;
-
-  fseek(context->pInputFile, 0, SEEK_END);
-  fileSize = ftell(context->pInputFile);
-  rewind(context->pInputFile);
-  debug("start do_parse: %d", fileSize);
+  BOOL eos = MPP_FALSE;
 
   while (1) {
-    stream_data = tmp_stream_data;
-    stream_length = fread(stream_data, 1, MPP_PACKET_PARSE_REGION_SIZE,
-                          context->pInputFile);
-    debug("stream_length = %d length = %d, offset = %d", stream_length, length,
-          context->nFileOffset);
-    if (length == stream_length &&
-        (context->nFileOffset + stream_length) == fileSize) {
-      debug("It is the last data, handle it and then quit!");
-      need_drain = 1;
-    }
+    ret = VI_RequestOutputData(context->pViCtx,
+                               PACKET_GetBaseData(context->pInputPacket));
+    if (ret == MPP_CODER_EOS) eos = MPP_TRUE;
 
-    if (0 == stream_length) {
-      debug("There is no data, quit!");
-      if (stream_data) {
-        free(stream_data);
-        stream_data = NULL;
-      }
-      break;
-    }
+    do {
+      ret = -1;
+      VDEC_GetParam(context->pVdecCtx, &(context->pVdecPara));
+      if (!context->pVdecPara->nInputQueueLeftNum) continue;
+      ret = VDEC_Decode(context->pVdecCtx,
+                        PACKET_GetBaseData(context->pInputPacket));
+    } while (ret != 0);
 
-    while (1) {
-      ret = context->pParseCtx->ops->parse(
-          context->pParseCtx, (U8 *)stream_data, stream_length,
-          (U8 *)PACKET_GetDataPointer(context->pInputPacket), &length, 0,
-          need_drain);
-      if (0 == ret || need_drain) {
-        if (need_drain) {
-          PACKET_SetEos(context->pInputPacket, MPP_TRUE);
-          debug("length = %d here, ret: %d", length, ret);
-        }
-        stream_data += length;
-        stream_length -= length;
+    ret = VI_ReturnOutputData(context->pViCtx,
+                              PACKET_GetBaseData(context->pInputPacket));
 
-        context->nFileOffset += length;
-        PACKET_SetLength(context->pInputPacket, length);
-        // PACKET_SetPts(context->pInputPacket, context->nTimeStamp);
-        // context->nTimeStamp += 1000000;
-
-        debug("we get a packet, length = %d, ret = %d %p %x %x %x %x", length,
-              ret, PACKET_GetDataPointer(context->pInputPacket),
-              *(S32 *)PACKET_GetDataPointer(context->pInputPacket),
-              *(S32 *)(PACKET_GetDataPointer(context->pInputPacket) + 4),
-              *(S32 *)(PACKET_GetDataPointer(context->pInputPacket) + 8),
-              *(S32 *)(PACKET_GetDataPointer(context->pInputPacket) + 12));
-
-        do {
-          ret = -1;
-          VDEC_GetParam(context->pVdecCtx, &(context->pVdecPara));
-          if (!context->pVdecPara->nInputQueueLeftNum) continue;
-          ret = VDEC_Decode(context->pVdecCtx,
-                            PACKET_GetBaseData(context->pInputPacket));
-        } while (ret != 0);
-
-        need_drain = 0;
-      } else {
-        length = stream_length;
-        fseek(context->pInputFile, context->nFileOffset, SEEK_SET);
-        debug("fileoffset = %d", context->nFileOffset);
-        break;
-      }
-    }
+    if (eos) break;
   }
 
   debug("do_parse thread exit=============================");
 }
 
-void *do_save(void *private_data) {
-  debug("------------------new thread : do save-------------------");
-  TestVdecContext *context = (TestVdecContext *)private_data;
+static S32 ViPrepare(TestContext *context) {
   S32 ret = 0;
-  BOOL stop = MPP_FALSE;
-
-  while (1) {
-    ret = VENC_GetOutputStreamBuffer(
-        context->pVencCtx, PACKET_GetBaseData(context->pOutputPacket));
-    if (ret == MPP_OK) {
-      fwrite(PACKET_GetDataPointer(context->pOutputPacket),
-             PACKET_GetLength(context->pOutputPacket), 1, context->pOutputFile);
-      fflush(context->pOutputFile);
-    } else if (ret == MPP_CODER_EOS) {
-      debug("final EOS");
-      fwrite(PACKET_GetDataPointer(context->pOutputPacket),
-             PACKET_GetLength(context->pOutputPacket), 1, context->pOutputFile);
-      fflush(context->pOutputFile);
-      stop = MPP_TRUE;
-    }
-
-    S32 index = -1;
-    do {
-      index = VENC_ReturnInputFrame(context->pVencCtx, NULL);
-      if (index >= 0) {
-        MppFrame *frame = FRAME_Create();
-        FRAME_SetID(frame, index);
-        VDEC_ReturnOutputFrame(context->pVdecCtx, FRAME_GetBaseData(frame));
-        FRAME_Destory(frame);
-      }
-    } while (index != -1);
-
-    if (stop) break;
+  // create vi channel
+  context->pViCtx = VI_CreateChannel();
+  if (!context->pViCtx) {
+    error("Can not create MppViCtx, please check!");
+    return -1;
   }
 
-  debug("do_save thread exit=============================");
+  // set vi para
+  context->pViCtx->eViType = context->eViType;
+  context->pViCtx->stViPara.nWidth = context->nWidth;
+  context->pViCtx->stViPara.nHeight = context->nHeight;
+  context->pViCtx->stViPara.ePixelFormat = context->eOutputPixelFormat;
+  context->pViCtx->stViPara.eCodingType = context->eCodingType;
+  context->pViCtx->stViPara.pInputFileName = context->pInputFileName;
+  context->pViCtx->stViPara.bIsFrame = MPP_FALSE;
+
+  // init vi
+  ret = VI_Init(context->pViCtx);
+  if (ret) {
+    error("VI_init failed, please check!");
+    return -1;
+  }
+
+  return 0;
+}
+
+static S32 VdecPrepare(TestContext *context) {
+  S32 ret = 0;
+  // create vdec channel
+  context->pVdecCtx = VDEC_CreateChannel();
+  if (!context->pVdecCtx) {
+    error("Can not create MppVdecCtx, please check!");
+    return -1;
+  }
+
+  // set vdec para
+  context->pVdecCtx->stVdecPara.eCodingType = context->eCodingType;
+  context->pVdecCtx->stVdecPara.nWidth = context->nWidth;
+  context->pVdecCtx->stVdecPara.nHeight = context->nHeight;
+  if (context->nWidth >= 3840 || context->nHeight >= 2160) {
+    debug("4K video, downscale!\n");
+    context->pVdecCtx->stVdecPara.nScale = 2;
+  } else {
+    context->pVdecCtx->stVdecPara.nScale = 1;
+  }
+  context->pVdecCtx->stVdecPara.eOutputPixelFormat =
+      context->eOutputPixelFormat;
+  context->pVdecCtx->eCodecType = context->eVdecType;
+  context->pVdecCtx->stVdecPara.nHorizonScaleDownRatio = 1;
+  context->pVdecCtx->stVdecPara.nVerticalScaleDownRatio = 1;
+  context->pVdecCtx->stVdecPara.nRotateDegree = 0;
+  context->pVdecCtx->stVdecPara.bThumbnailMode = 0;
+  context->pVdecCtx->stVdecPara.bIsInterlaced = MPP_FALSE;
+  context->pVdecCtx->stVdecPara.eFrameBufferType =
+      MPP_FRAME_BUFFERTYPE_NORMAL_INTERNAL;
+  context->bIsDestoryed = MPP_FALSE;
+
+  // vdec init
+  ret = VDEC_Init(context->pVdecCtx);
+  if (ret) {
+    error("VDEC_init failed, please check!");
+    return -1;
+  }
+
+  return 0;
+}
+
+static S32 VencPrepare(TestContext *context) {
+  S32 ret = 0;
+  // create venc channel
+  context->pVencCtx = VENC_CreateChannel();
+  if (!context->pVencCtx) {
+    error("Can not create MppVencCtx, please check !");
+    return -1;
+  }
+
+  context->pVencCtx->stVencPara.eCodingType = context->eCodingType;
+  context->pVencCtx->stVencPara.nWidth = context->nWidth;
+  context->pVencCtx->stVencPara.nHeight = context->nHeight;
+  context->pVencCtx->stVencPara.PixelFormat = context->eOutputPixelFormat;
+  context->pVencCtx->stVencPara.eFrameBufferType =
+      MPP_FRAME_BUFFERTYPE_NORMAL_EXTERNAL;
+  context->pVencCtx->eCodecType = context->eVencType;
+
+  // venc init
+  ret = VENC_Init(context->pVencCtx);
+  if (ret) {
+    error("VENC_init failed, please check!");
+    return -1;
+  }
+
+  return 0;
+}
+
+static S32 VoPrepare(TestContext *context) {
+  S32 ret = 0;
+  // create vo channel
+  context->pVoCtx = VO_CreateChannel();
+  if (!context->pVoCtx) {
+    error("Can not create MppVoCtx, please check!");
+    return -1;
+  }
+
+  // set vo para
+  context->pVoCtx->eVoType = context->eVoType;
+  context->pVoCtx->stVoPara.nWidth = context->nWidth;
+  context->pVoCtx->stVoPara.nHeight = context->nHeight;
+  context->pVoCtx->stVoPara.nStride = context->nWidth;
+  context->pVoCtx->stVoPara.ePixelFormat = context->eOutputPixelFormat;
+  context->pVoCtx->stVoPara.bIsFrame = MPP_FALSE;
+  context->pVoCtx->stVoPara.pOutputFileName = context->pOutputFileName;
+
+  // init vo
+  ret = VO_Init(context->pVoCtx);
+  if (ret) {
+    error("VO_init failed, please check!");
+    return -1;
+  }
+
+  return 0;
 }
 
 S32 main(S32 argc, char **argv) {
-  TestVdecContext *context = NULL;
+  TestContext *context = NULL;
   S32 argument_num = 0;
   S32 ret = 0;
 
-  context = TestVdecContextCreate();
+  context = TestContextCreate();
   if (!context) {
-    error("can not create TestVdecContext, please check!");
+    error("can not create TestContext, please check!");
     return -1;
   }
 
@@ -336,65 +370,19 @@ S32 main(S32 argc, char **argv) {
     goto finish;
   }
 
-  // create parser
-  context->pParseCtx = PARSE_Create(context->eCodingType);
-  if (!context->pParseCtx) {
-    error("create context->pParseCtx failed, please check!");
-    goto finish;
-  }
-  context->pParseCtx->ops->init(context->pParseCtx);
-
-  // create vdec channel
-  context->pVdecCtx = VDEC_CreateChannel();
-  if (!context->pVdecCtx) {
-    error("Can not create MppVdecCtx, please check!");
+  if (ViPrepare(context)) {
     goto finish;
   }
 
-  // set vdec para
-  context->pVdecCtx->stVdecPara.eCodingType = context->eCodingType;
-  context->pVdecCtx->stVdecPara.nWidth = context->nWidth;
-  context->pVdecCtx->stVdecPara.nHeight = context->nHeight;
-  if (context->nWidth >= 3840 || context->nHeight >= 2160) {
-    debug("4K video, downscale!\n");
-    context->pVdecCtx->stVdecPara.nScale = 2;
-  } else {
-    context->pVdecCtx->stVdecPara.nScale = 1;
-  }
-  context->pVdecCtx->stVdecPara.eOutputPixelFormat =
-      context->eOutputPixelFormat;
-  context->pVdecCtx->eCodecType = context->eCodecType;
-  context->pVdecCtx->stVdecPara.nHorizonScaleDownRatio = 1;
-  context->pVdecCtx->stVdecPara.nVerticalScaleDownRatio = 1;
-  context->pVdecCtx->stVdecPara.nRotateDegree = 0;
-  context->pVdecCtx->stVdecPara.bThumbnailMode = 0;
-  context->pVdecCtx->stVdecPara.bIsInterlaced = MPP_FALSE;
-  context->bIsDestoryed = MPP_FALSE;
-
-  // vdec init
-  ret = VDEC_Init(context->pVdecCtx);
-  if (ret) {
-    error("VDEC_init failed, please check!");
+  if (VdecPrepare(context)) {
     goto finish;
   }
 
-  // create venc channel
-  context->pVencCtx = VENC_CreateChannel();
-  if (!context->pVencCtx) {
-    error("Can not create MppVencCtx, please check !");
+  if (VencPrepare(context)) {
     goto finish;
   }
 
-  context->pVencCtx->stVencPara.eCodingType = context->eCodingType;
-  context->pVencCtx->stVencPara.nWidth = context->nWidth;
-  context->pVencCtx->stVencPara.nHeight = context->nHeight;
-  context->pVencCtx->stVencPara.PixelFormat = context->eOutputPixelFormat;
-  context->pVencCtx->eCodecType = context->eCodecType;
-
-  // venc init
-  ret = VENC_Init(context->pVencCtx);
-  if (ret) {
-    error("VENC_init failed, please check!");
+  if (VoPrepare(context)) {
     goto finish;
   }
 
@@ -418,18 +406,6 @@ S32 main(S32 argc, char **argv) {
   // mpp frame init
   context->pFrame = FRAME_Create();
 
-  context->pInputFile = fopen(context->pInputFileName, "r");
-  if (!context->pInputFile) {
-    error("can not open context->pInputFileName, please check !");
-    goto finish;
-  }
-
-  context->pOutputFile = fopen(context->pOutputFileName, "w+");
-  if (!context->pOutputFile) {
-    error("can not open context->pOutputFileName, please check !");
-    goto finish;
-  }
-
   context->pMidFile = fopen(context->pMidFileName, "w+");
   if (!context->pMidFile) {
     error("can not open context->pMidFileName, please check !");
@@ -447,22 +423,15 @@ S32 main(S32 argc, char **argv) {
       if (ret == MPP_OK) {
         FRAME_SetPts(context->pFrame, context->nTimeStamp);
         context->nTimeStamp += 1000000;
-        /*
-                fwrite(FRAME_GetDataPointer(context->pFrame, 0), 1920*1080, 1,
-                      context->pMidFile);
-                fwrite(FRAME_GetDataPointer(context->pFrame, 1), 1920*1080 / 2,
-           1, context->pMidFile); fflush(context->pMidFile);
-        */
+
         ret = VENC_SendInputFrame(context->pVencCtx,
                                   FRAME_GetBaseData(context->pFrame));
         do {
           ret = VENC_GetOutputStreamBuffer(
               context->pVencCtx, PACKET_GetBaseData(context->pOutputPacket));
           if (ret == MPP_OK) {
-            fwrite(PACKET_GetDataPointer(context->pOutputPacket),
-                   PACKET_GetLength(context->pOutputPacket), 1,
-                   context->pOutputFile);
-            fflush(context->pOutputFile);
+            VO_Process(context->pVoCtx,
+                       PACKET_GetBaseData(context->pOutputPacket));
           }
         } while (ret != MPP_OK);
 
@@ -477,33 +446,23 @@ S32 main(S32 argc, char **argv) {
           }
         } while (index == -1);
       } else if (ret == MPP_CODER_EOS) {
-        /*
-                fwrite(FRAME_GetDataPointer(context->pFrame, 0), 1920*1080, 1,
-                      context->pMidFile);
-                fwrite(FRAME_GetDataPointer(context->pFrame, 1), 1920*1080 / 2,
-           1, context->pMidFile); fflush(context->pMidFile);
-        */
         FRAME_SetPts(context->pFrame, context->nTimeStamp);
-        FRAME_SetEos(context->pFrame, MPP_TRUE);
+        FRAME_SetEos(context->pFrame, FRAME_EOS_WITHOUT_DATA);
         ret = VENC_SendInputFrame(context->pVencCtx,
                                   FRAME_GetBaseData(context->pFrame));
         do {
           ret = VENC_GetOutputStreamBuffer(
               context->pVencCtx, PACKET_GetBaseData(context->pOutputPacket));
           if (ret == MPP_OK) {
-            fwrite(PACKET_GetDataPointer(context->pOutputPacket),
-                   PACKET_GetLength(context->pOutputPacket), 1,
-                   context->pOutputFile);
-            fflush(context->pOutputFile);
+            VO_Process(context->pVoCtx,
+                       PACKET_GetBaseData(context->pOutputPacket));
           }
         } while (ret != MPP_CODER_EOS);
 
         if (ret == MPP_CODER_EOS) {
           debug("final EOS");
-          fwrite(PACKET_GetDataPointer(context->pOutputPacket),
-                 PACKET_GetLength(context->pOutputPacket), 1,
-                 context->pOutputFile);
-          fflush(context->pOutputFile);
+          VO_Process(context->pVoCtx,
+                     PACKET_GetBaseData(context->pOutputPacket));
         }
 
         S32 index = -1;
@@ -545,21 +504,10 @@ finish:
 
   context->bIsDestoryed = MPP_TRUE;
 
-  if (context->pOutputFile) {
-    fflush(context->pOutputFile);
-    fclose(context->pOutputFile);
-    context->pOutputFile = NULL;
-  }
   if (context->pMidFile) {
     fflush(context->pMidFile);
     fclose(context->pMidFile);
     context->pMidFile = NULL;
-  }
-
-  if (context->pInputFile) {
-    fflush(context->pInputFile);
-    fclose(context->pInputFile);
-    context->pInputFile = NULL;
   }
 
   if (context->pFrame) {
@@ -579,6 +527,11 @@ finish:
     context->pOutputPacket = NULL;
   }
 
+  if (context->pViCtx) {
+    VI_DestoryChannel(context->pViCtx);
+    context->pViCtx = NULL;
+  }
+
   if (context->pVdecCtx) {
     VDEC_DestoryChannel(context->pVdecCtx);
     context->pVdecCtx = NULL;
@@ -589,9 +542,9 @@ finish:
     context->pVencCtx = NULL;
   }
 
-  if (context->pParseCtx) {
-    PARSE_Destory(context->pParseCtx);
-    context->pParseCtx = NULL;
+  if (context->pVoCtx) {
+    VO_DestoryChannel(context->pVoCtx);
+    context->pVoCtx = NULL;
   }
 
   if (context->pInputFileName) {

@@ -5,7 +5,7 @@
  *
  * @Author: David(qiang.fu@spacemit.com)
  * @Date: 2023-01-17 09:38:36
- * @LastEditTime: 2023-11-14 11:10:04
+ * @LastEditTime: 2024-05-07 15:19:10
  * @Description: MPP VENC API, use these API to do video encode
  *               from frame(YUV420) to stream(H.264 etc.)
  */
@@ -41,6 +41,22 @@ MppVencCtx *VENC_CreateChannel() {
     error("can not create MppVencCtx, please check !");
     return NULL;
   }
+
+  enc_create = (ALBaseContext * (*)())NULL;
+  enc_init = (void (*)(ALBaseContext * ctx, MppVencPara * para))NULL;
+  enc_set_para = (S32(*)(ALBaseContext * ctx, MppVencPara * para))NULL;
+  enc_return_input_frame = (S32(*)(ALBaseContext * ctx, MppData * sink_Data))NULL;
+  enc_send_input_frame = (S32(*)(ALBaseContext * ctx, MppData * sink_Data))NULL;
+  enc_encode = (S32(*)(ALBaseContext * ctx, MppData * sink_data))NULL;
+  enc_process =
+      (S32(*)(ALBaseContext * ctx, MppData * sink_data, MppData * src_data))NULL;
+  enc_get_output_stream = (S32(*)(ALBaseContext * ctx, MppData * src_Data))NULL;
+  enc_request_output_stream = (S32(*)(ALBaseContext * ctx, MppData * src_Data))NULL;
+  enc_return_output_stream = (S32(*)(ALBaseContext * ctx, MppData * src_Data))NULL;
+  enc_flush = (S32(*)(ALBaseContext * ctx))NULL;
+  enc_destory = (void (*)(ALBaseContext * ctx))NULL;
+
+  ctx->pModule = NULL;
 
   return ctx;
 }
@@ -180,8 +196,8 @@ S32 VENC_Flush(MppVencCtx *ctx) {
 
 S32 VENC_DestoryChannel(MppVencCtx *ctx) {
   if (ctx) {
-    enc_destory(ctx->pNode.pAlBaseContext);
-    module_destory(ctx->pModule);
+    if (enc_destory) enc_destory(ctx->pNode.pAlBaseContext);
+    if (ctx->pModule) module_destory(ctx->pModule);
     free(ctx);
   }
   return 0;

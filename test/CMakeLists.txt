@@ -27,57 +27,33 @@ set(SRC_LIST ./test_sys_vdec_venc_vdec_one_frame.c)
 add_executable(test_sys_vdec_venc_vdec_one_frame ${SRC_LIST})
 target_link_libraries(test_sys_vdec_venc_vdec_one_frame spacemit_mpp)
 
-set(SRC_LIST ./vdec_test.c ./parse/h264parse.c ./parse/h265parse.c ./parse/mjpegparse.c ./parse/defaultparse.c ./parse/parse.c)
-add_executable(vdec_test ${SRC_LIST})
-target_link_libraries(vdec_test spacemit_mpp)
+set(SRC_LIST ./vi_file_vdec_vo_test.c)
+add_executable(vi_file_vdec_vo_test ${SRC_LIST})
+target_link_libraries(vi_file_vdec_vo_test spacemit_mpp)
 
-set(SRC_LIST ./vdec_vo_test.c ./parse/h264parse.c ./parse/h265parse.c ./parse/mjpegparse.c ./parse/defaultparse.c ./parse/parse.c)
-add_executable(vdec_vo_test ${SRC_LIST})
-target_link_libraries(vdec_vo_test spacemit_mpp)
+set(SRC_LIST ./vi_file_vdec_venc_sync_userptr_vo_file_test.c)
+add_executable(vi_file_vdec_venc_sync_userptr_vo_file_test ${SRC_LIST})
+target_link_libraries(vi_file_vdec_venc_sync_userptr_vo_file_test spacemit_mpp)
 
-set(SRC_LIST ./vdec_venc_test.c ./parse/h264parse.c ./parse/h265parse.c ./parse/mjpegparse.c ./parse/defaultparse.c ./parse/parse.c)
-add_executable(vdec_venc_test ${SRC_LIST})
-target_link_libraries(vdec_venc_test spacemit_mpp)
-
-set(SRC_LIST ./vdec_venc_sync_test.c ./parse/h264parse.c ./parse/h265parse.c ./parse/mjpegparse.c ./parse/defaultparse.c ./parse/parse.c)
-add_executable(vdec_venc_sync_test ${SRC_LIST})
-target_link_libraries(vdec_venc_sync_test spacemit_mpp)
-
-set(SRC_LIST ./vdec_venc_sync_userptr_test.c ./parse/h264parse.c ./parse/h265parse.c ./parse/mjpegparse.c ./parse/defaultparse.c ./parse/parse.c)
-add_executable(vdec_venc_sync_userptr_test ${SRC_LIST})
-target_link_libraries(vdec_venc_sync_userptr_test spacemit_mpp)
-
-set(SRC_LIST ./venc_sync_userptr_test.c ./parse/h264parse.c ./parse/h265parse.c ./parse/mjpegparse.c ./parse/defaultparse.c ./parse/parse.c)
-add_executable(venc_sync_userptr_test ${SRC_LIST})
-target_link_libraries(venc_sync_userptr_test spacemit_mpp)
-
-set(SRC_LIST ./venc_test.c)
-add_executable(venc_test ${SRC_LIST})
-target_link_libraries(venc_test spacemit_mpp)
+set(SRC_LIST ./vi_file_venc_sync_userptr_vo_file_test.c)
+add_executable(vi_file_venc_sync_userptr_vo_file_test ${SRC_LIST})
+target_link_libraries(vi_file_venc_sync_userptr_vo_file_test spacemit_mpp)
 
 set(SRC_LIST ./g2d_test.c)
 add_executable(g2d_test ${SRC_LIST})
 target_link_libraries(g2d_test spacemit_mpp)
 
-set(SRC_LIST ./vi_v4l2_vo_file_test.c)
-add_executable(vi_v4l2_vo_file_test ${SRC_LIST})
-target_link_libraries(vi_v4l2_vo_file_test spacemit_mpp)
+set(SRC_LIST ./vi_v4l2_vo_test.c)
+add_executable(vi_v4l2_vo_test ${SRC_LIST})
+target_link_libraries(vi_v4l2_vo_test spacemit_mpp)
 
-install(TARGETS vdec_test RUNTIME
+install(TARGETS vi_file_vdec_vo_test RUNTIME
         DESTINATION "${CMAKE_INSTALL_PREFIX}/bin")
-install(TARGETS vdec_vo_test RUNTIME
+install(TARGETS vi_file_vdec_venc_sync_userptr_vo_file_test RUNTIME
         DESTINATION "${CMAKE_INSTALL_PREFIX}/bin")
-install(TARGETS venc_test RUNTIME
-        DESTINATION "${CMAKE_INSTALL_PREFIX}/bin")
-install(TARGETS vdec_venc_test RUNTIME
-        DESTINATION "${CMAKE_INSTALL_PREFIX}/bin")
-install(TARGETS vdec_venc_sync_test RUNTIME
-        DESTINATION "${CMAKE_INSTALL_PREFIX}/bin")
-install(TARGETS vdec_venc_sync_userptr_test RUNTIME
-        DESTINATION "${CMAKE_INSTALL_PREFIX}/bin")
-install(TARGETS venc_sync_userptr_test RUNTIME
+install(TARGETS vi_file_venc_sync_userptr_vo_file_test RUNTIME
         DESTINATION "${CMAKE_INSTALL_PREFIX}/bin")
 install(TARGETS g2d_test RUNTIME
         DESTINATION "${CMAKE_INSTALL_PREFIX}/bin")
-install(TARGETS vi_v4l2_vo_file_test RUNTIME
+install(TARGETS vi_v4l2_vo_test RUNTIME
         DESTINATION "${CMAKE_INSTALL_PREFIX}/bin")
